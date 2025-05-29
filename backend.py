@@ -16,9 +16,9 @@ def health_check():
 def analyze():
     try:
         data = request.get_json()
-        content = data.get("content")
-        persona = data.get("persona", "CMO")
-        stage = data.get("stage", "adoption")
+        content = data.get('content')
+        persona = data.get('persona', 'CMO')
+        stage = data.get('stage', 'adoption')
 
         if not content:
             return jsonify({"error": "No content provided"}), 400
@@ -48,16 +48,19 @@ Content:
 
         response = openai.ChatCompletion.create(
             model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
+            messages=[
+                {"role": "user", "content": prompt}
+            ],
             temperature=0.7
         )
 
-        analysis = response.choices[0].message["content"]
-        return jsonify({"analysis": analysis})
+        result = response.choices[0].message['content']
+        return jsonify({'analysis': result})
 
     except Exception as e:
-        print(f"Error: {e}")
-        return jsonify({"error": str(e)}), 500
+        import traceback
+        traceback.print_exc()  # Log to console for debugging
+        return jsonify({'error': f'Server error: {str(e)}'}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080)
