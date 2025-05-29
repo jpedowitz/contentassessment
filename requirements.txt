@@ -1,0 +1,6 @@
+Flask
+flask-cors
+openai
+python-docx
+PyMuPDF
+docx2txt
