@@ -1,120 +1,113 @@
+import os
+import io
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from PyPDF2 import PdfReader
+import docx
 import openai
-import os
-import fitz  # PyMuPDF
-import docx2txt
-import traceback
+
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 app = Flask(__name__)
 CORS(app)
 
-openai.api_key = os.getenv("OPENAI_API_KEY")
+def extract_text_from_pdf(file_stream):
+    try:
+        reader = PdfReader(file_stream)
+        return "\n".join([page.extract_text() or '' for page in reader.pages])
+    except:
+        return ""
 
-RUBRIC_CATEGORIES = [
-    "Clarity & Structure",
-    "Audience Relevance",
-    "Value & Insight",
-    "Call to Action",
-    "Brand Voice & Tone",
-    "SEO & Discoverability",
-    "Visual/Design Integration",
-    "Performance Readiness"
-]
+def extract_text_from_docx(file_stream):
+    try:
+        doc = docx.Document(file_stream)
+        return "\n".join([para.text for para in doc.paragraphs])
+    except:
+        return ""
 
-@app.route('/')
-def health_check():
-    return "Service is running."
+def summarize_insights(text, persona, stage):
+    rubric = [
+        "Clarity & Structure",
+        "Audience Relevance",
+        "Value & Insight",
+        "Call to Action",
+        "Brand Voice & Tone",
+        "SEO & Discoverability",
+        "Visual/Design Integration",
+        "Performance Readiness"
+    ]
 
-def extract_text(file):
-    filename = file.filename.lower()
-    if filename.endswith(".pdf"):
-        text = ""
-        with fitz.open(stream=file.read(), filetype="pdf") as doc:
-            for page in doc:
-                text += page.get_text()
-        return text
-    elif filename.endswith(".docx"):
-        path = f"/tmp/{file.filename}"
-        file.save(path)
-        return docx2txt.process(path)
-    elif filename.endswith(".txt"):
-        return file.read().decode("utf-8")
-    else:
-        raise ValueError("Unsupported file type")
-
-def build_prompt(content, persona, stage):
-    categories = "\n".join([f"{i+1}. {cat}" for i, cat in enumerate(RUBRIC_CATEGORIES)])
-    return f"""
-You are an expert B2B content evaluator. Analyze the following content using the eight criteria below. For each category, provide:
-1. A numeric score from 1 to 5
-2. A brief reason for the score
-3. One actionable recommendation to improve it
-
-Persona: {persona}
-Buyer Journey Stage: {stage}
+    prompt = f"""
+You are a marketing content evaluator. Assess the following content based on 8 criteria. 
+For each criterion, provide a score from 1 to 5, a brief reason, and a recommendation for improvement. 
+End with a total score. The content is targeted at a {persona} in the {stage} stage of their buying journey.
 
 Criteria:
-{categories}
+1. Clarity & Structure
+2. Audience Relevance
+3. Value & Insight
+4. Call to Action
+5. Brand Voice & Tone
+6. SEO & Discoverability
+7. Visual/Design Integration
+8. Performance Readiness
 
 Content:
-""" + content.strip()
+{text[:5000]}  # Truncate to stay under token limits
+"""
+
+    response = openai.chat.completions.create(
+        model="gpt-4",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.4
+    )
+
+    return response.choices[0].message.content.strip()
 
 @app.route('/analyze', methods=['POST'])
 def analyze():
+    file = request.files.get('file')
+    persona = request.form.get('persona', 'General')
+    stage = request.form.get('stage', 'Unaware')
+
+    if not file:
+        return jsonify({'error': 'No file uploaded'}), 400
+
+    filename = file.filename.lower()
+    if filename.endswith('.pdf'):
+        content = extract_text_from_pdf(file)
+    elif filename.endswith('.docx'):
+        content = extract_text_from_docx(file)
+    elif filename.endswith('.txt'):
+        content = file.read().decode('utf-8', errors='ignore')
+    else:
+        return jsonify({'error': 'Unsupported file format'}), 400
+
     try:
-        file = request.files['file']
-        persona = request.form['persona']
-        stage = request.form['stage']
+        feedback = summarize_insights(content, persona, stage)
 
-        content = extract_text(file)
-        prompt = build_prompt(content, persona, stage)
+        scores = []
+        total = 0
+        for section in feedback.split("\n\n"):
+            lines = section.strip().split("\n")
+            if len(lines) >= 3 and "Score:" in lines[0]:
+                label = lines[0].split("Score:")[0].strip("12345678. ").strip()
+                score = int(lines[0].split("Score:")[1].strip())
+                reason = lines[1].replace("Reason:", "").strip()
+                recommendation = lines[2].replace("Recommendation:", "").strip()
+                scores.append({
+                    "label": label,
+                    "score": score,
+                    "reason": reason,
+                    "recommendation": recommendation
+                })
+                total += score
 
-        response = openai.chat.completions.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": "You are an expert B2B content evaluator."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.7,
-            max_tokens=2000
-        )
-
-        reply = response.choices[0].message.content.strip()
-
-        # Try to parse scores and structure
-        result = []
-        lines = reply.splitlines()
-        current = {}
-        overall_score = 0
-        count = 0
-
-        for line in lines:
-            if any(cat in line for cat in RUBRIC_CATEGORIES):
-                if current:
-                    result.append(current)
-                current = {"category": line.split("**")[1] if "**" in line else line.strip()}
-            elif "Score:" in line:
-                score = int(line.split(":")[1].strip())
-                current['score'] = score
-                overall_score += score
-                count += 1
-            elif "Reason:" in line:
-                current['reason'] = line.split(":", 1)[1].strip()
-            elif "Recommendation:" in line:
-                current['recommendation'] = line.split(":", 1)[1].strip()
-        if current:
-            result.append(current)
-
-        avg_score = round(overall_score / count, 2) if count else 0
-
-        return jsonify({"overall_score": avg_score, "categories": result})
+        return jsonify({"scores": scores, "overall_score": total})
 
     except Exception as e:
-        error_trace = traceback.format_exc()
-        print("\U0001F525 ERROR:", error_trace)
-        return jsonify({'error': 'Internal server error', 'details': error_trace}), 500
+        return jsonify({'error': 'Internal server error', 'details': str(e)}), 500
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 8080))
+    port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port)
