@@ -14,22 +14,22 @@ def health_check():
 @app.route('/analyze', methods=['POST'])
 def analyze():
     try:
-        openai.api_key = os.getenv("OPENAI_API_KEY")
+        print("📥 Incoming request to /analyze")
 
-        if not openai.api_key:
-            raise Exception("OpenAI API key not set in environment variables.")
-
+        # Log incoming request data
         data = request.get_json()
+        print("📄 Request JSON:", data)
 
-        if not data:
-            raise ValueError("No JSON body received.")
+        openai.api_key = os.getenv("OPENAI_API_KEY")
+        if not openai.api_key:
+            raise Exception("OpenAI API key missing.")
 
         content = data.get('content')
         persona = data.get('persona', 'CMO')
         stage = data.get('stage', 'adoption')
 
         if not content:
-            raise ValueError("Content field missing from request.")
+            raise ValueError("Missing 'content' in request.")
 
         prompt = f"""
 You are an expert B2B content evaluator. Analyze the following content using the eight criteria below. For each category, provide:
@@ -54,6 +54,7 @@ Content:
 {content}
 """
 
+        print("🧠 Sending prompt to OpenAI...")
         response = openai.ChatCompletion.create(
             model="gpt-4",
             messages=[{"role": "user", "content": prompt}],
@@ -61,9 +62,10 @@ Content:
         )
 
         result = response.choices[0].message['content']
+        print("✅ OpenAI response received")
         return jsonify({'analysis': result})
 
     except Exception as e:
         error_trace = traceback.format_exc()
-        print("🔥 ERROR in /analyze:\n", error_trace)
+        print("🔥 ERROR:", error_trace)
         return jsonify({'error': 'Internal server error', 'details': error_trace}), 500
