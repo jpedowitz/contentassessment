@@ -1,78 +1,95 @@
-import os
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from werkzeug.utils import secure_filename
 import openai
+import os
+import fitz  # PyMuPDF
+import docx2txt
+import traceback
 
 app = Flask(__name__)
 CORS(app)
 
-openai.api_key = os.environ.get("OPENAI_API_KEY")
+# Set your OpenAI API key securely
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# Limit content to ~6,000 tokens (~24,000 chars) to stay under 80K TPM
-MAX_CONTENT_CHARS = 24000
+def extract_text_from_pdf(file_stream):
+    text = ""
+    with fitz.open(stream=file_stream.read(), filetype="pdf") as doc:
+        for page in doc:
+            text += page.get_text()
+    return text
+
+def extract_text_from_docx(file_stream):
+    with open("temp.docx", "wb") as f:
+        f.write(file_stream.read())
+    text = docx2txt.process("temp.docx")
+    os.remove("temp.docx")
+    return text
 
 @app.route('/')
-def home():
-    return "Content Assessment Backend is running."
+def health_check():
+    return "Service is running."
 
 @app.route('/analyze', methods=['POST'])
 def analyze():
     try:
-        if 'file' not in request.files:
-            return jsonify({'error': 'No file part in the request'}), 400
-
         file = request.files['file']
-        if file.filename == '':
-            return jsonify({'error': 'No selected file'}), 400
+        persona = request.form.get('persona', 'General')
+        stage = request.form.get('stage', 'Unaware')
 
-        persona = request.form.get('persona', '')
-        stage = request.form.get('stage', '')
+        filename = file.filename.lower()
+        if filename.endswith('.pdf'):
+            content = extract_text_from_pdf(file.stream)
+        elif filename.endswith('.docx'):
+            content = extract_text_from_docx(file.stream)
+        elif filename.endswith('.txt'):
+            content = file.read().decode('utf-8', errors='ignore')
+        else:
+            return jsonify({'error': 'Unsupported file type'}), 400
 
-        filename = secure_filename(file.filename)
-        content_bytes = file.read()
-
-        try:
-            content = content_bytes.decode('utf-8')
-        except UnicodeDecodeError:
-            content = content_bytes.decode('latin-1')  # fallback encoding
-
-        if len(content) > MAX_CONTENT_CHARS:
-            content = content[:MAX_CONTENT_CHARS]
+        safe_content = content[:6000]  # Stay within token limits
 
         prompt = f"""
-You are a B2B marketing strategist assessing a piece of content based on the following rubric:
+You are an expert B2B content evaluator. Analyze the following marketing content written for a {persona} in the "{stage}" stage of the buyer journey.
 
-1. Relevance to buyer stage: {stage}
-2. Alignment with target persona: {persona}
-3. Clarity, structure, and tone
-4. Differentiation and value proposition
-5. Call to action
-6. Engagement and design quality (if applicable)
-
-Evaluate the content and for each category:
-- Give a score from 1 to 5
-- Justify the score with a short rationale
-- Suggest 1–2 steps for improvement
-
-Content to assess:
+Content:
 \"\"\"
-{content}
+{safe_content}
 \"\"\"
+
+Evaluate across 8 criteria:
+1. Clarity & Structure
+2. Audience Relevance
+3. Value & Insight
+4. Call to Action
+5. Brand Voice & Tone
+6. SEO & Discoverability
+7. Visual/Design Integration
+8. Performance Readiness
+
+For each, provide:
+- A numeric score from 1 to 5
+- A brief reason for the score
+- One actionable recommendation
 """
 
         response = openai.chat.completions.create(
-            model="gpt-4-turbo",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.4
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are a content assessment expert."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.5
         )
 
-        result = response.choices[0].message.content.strip()
+        result = response.choices[0].message.content
         return jsonify({'analysis': result})
 
     except Exception as e:
-        return jsonify({'error': 'Internal server error', 'details': str(e)}), 500
+        error_trace = traceback.format_exc()
+        print("🔥 ERROR:", error_trace)
+        return jsonify({'error': 'Internal server error', 'details': error_trace}), 500
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host="0.0.0.0", port=port)
