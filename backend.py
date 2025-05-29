@@ -2,62 +2,66 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import openai
 import os
-import traceback
+import fitz  # PyMuPDF
+import docx
 
 app = Flask(__name__)
 CORS(app)
 
+# Use environment variable for key security
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-@app.route('/')
-def health_check():
-    return "Service is running."
-
-@app.route('/analyze', methods=['POST'])
+@app.route("/analyze", methods=["POST"])
 def analyze():
     try:
-        file = request.files['file']
-        persona = request.form.get("persona")
-        stage = request.form.get("stage")
+        file = request.files["file"]
+        persona = request.form["persona"]
+        stage = request.form["stage"]
+        filename = file.filename.lower()
 
-        content = file.read().decode('utf-8')
+        if filename.endswith(".txt"):
+            content = file.read().decode("utf-8", errors="ignore")
+        elif filename.endswith(".pdf"):
+            doc = fitz.open(stream=file.read(), filetype="pdf")
+            content = "\n".join([page.get_text() for page in doc])
+        elif filename.endswith(".docx"):
+            doc = docx.Document(file)
+            content = "\n".join([para.text for para in doc.paragraphs])
+        else:
+            return jsonify({"error": "Unsupported file type", "details": filename}), 400
 
-        prompt = f"""
-You are an expert B2B content evaluator. Analyze the following content using the eight criteria below. For each category, provide:
-1. A numeric score from 1 to 5
-2. A brief reason for the score
-3. One actionable recommendation to improve it
+        prompt = f"""You are a content marketing expert. Assess the uploaded content for how well it aligns with the persona '{persona}' and the buying journey stage '{stage}'.
 
-Persona: {persona}
-Buyer Journey Stage: {stage}
+Score the content (1–10) based on:
+1. Relevance to persona
+2. Stage alignment
+3. Clarity
+4. Persuasiveness
+5. Actionability
 
-Criteria:
-- Clarity & Structure
-- Audience Relevance
-- Value & Insight
-- Call to Action
-- Brand Voice & Tone
-- SEO & Discoverability
-- Visual/Design Integration
-- Performance Readiness
+Then, explain the reasoning behind each score and offer 3 concrete suggestions for improvement.
 
-Content:
-{content}
+Content to assess:
+\"\"\"
+{content[:3000]}  # capped to avoid token limits
+\"\"\"
 """
 
-        completion = openai.ChatCompletion.create(
+        response = openai.ChatCompletion.create(
             model="gpt-4",
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=800
         )
 
-        analysis = completion.choices[0].message.content
+        analysis = response.choices[0].message.content.strip()
+
         return jsonify({"analysis": analysis})
 
     except Exception as e:
-        error_trace = traceback.format_exc()
-        print("🔥 ERROR:", error_trace)
-        return jsonify({'error': 'Internal server error', 'details': error_trace}), 500
+        return jsonify({"error": "Internal server error", "details": str(e)}), 500
 
+
+# 🔌 Ensure Flask runs on the correct port in Render
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
