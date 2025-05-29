@@ -2,28 +2,34 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import openai
 import os
+import traceback
 
 app = Flask(__name__)
 CORS(app)
-
-openai.api_key = os.getenv("OPENAI_API_KEY")
 
 @app.route('/')
 def health_check():
     return "Service is running."
 
-import traceback
-
 @app.route('/analyze', methods=['POST'])
 def analyze():
     try:
+        openai.api_key = os.getenv("OPENAI_API_KEY")
+
+        if not openai.api_key:
+            raise Exception("OpenAI API key not set in environment variables.")
+
         data = request.get_json()
+
+        if not data:
+            raise ValueError("No JSON body received.")
+
         content = data.get('content')
         persona = data.get('persona', 'CMO')
         stage = data.get('stage', 'adoption')
 
         if not content:
-            return jsonify({"error": "No content provided"}), 400
+            raise ValueError("Content field missing from request.")
 
         prompt = f"""
 You are an expert B2B content evaluator. Analyze the following content using the eight criteria below. For each category, provide:
@@ -50,9 +56,7 @@ Content:
 
         response = openai.ChatCompletion.create(
             model="gpt-4",
-            messages=[
-                {"role": "user", "content": prompt}
-            ],
+            messages=[{"role": "user", "content": prompt}],
             temperature=0.7
         )
 
@@ -60,9 +64,6 @@ Content:
         return jsonify({'analysis': result})
 
     except Exception as e:
-        import traceback
-        traceback.print_exc()  # Log to console for debugging
-        return jsonify({'error': f'Server error: {str(e)}'}), 500
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8080)
+        error_trace = traceback.format_exc()
+        print("🔥 ERROR in /analyze:\n", error_trace)
+        return jsonify({'error': 'Internal server error', 'details': error_trace}), 500
