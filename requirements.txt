@@ -1,6 +1,6 @@
 Flask
 flask-cors
-openai
+PyPDF2
 python-docx
-PyMuPDF
-docx2txt
+openai
+
