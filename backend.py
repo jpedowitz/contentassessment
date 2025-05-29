@@ -12,6 +12,8 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 def health_check():
     return "Service is running."
 
+import traceback
+
 @app.route('/analyze', methods=['POST'])
 def analyze():
     try:
