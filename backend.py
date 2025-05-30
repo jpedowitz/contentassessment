@@ -4,12 +4,10 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from PyPDF2 import PdfReader
 import docx
-from openai import OpenAI
+import openai
 
-# Initialize OpenAI client (v1+ style)
-client = OpenAI(
-    api_key=os.getenv("OPENAI_API_KEY")
-)
+# Set OpenAI API key (legacy style)
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 app = Flask(__name__)
 CORS(app)
@@ -31,52 +29,47 @@ def extract_text_from_docx(file_stream):
         return ""
 
 def summarize_insights(text, persona, stage):
-    rubric = [
-        "Clarity & Structure",
-        "Audience Relevance", 
-        "Value & Insight",
-        "Call to Action",
-        "Brand Voice & Tone",
-        "SEO & Discoverability",
-        "Visual/Design Integration",
-        "Performance Readiness"
-    ]
-
     prompt = f"""
-You are a marketing content evaluator. Assess the following content based on 8 criteria. 
-For each criterion, provide a score from 1 to 5, a brief reason, and a recommendation for improvement. 
-End with a total score. The content is targeted at a {persona} in the {stage} stage of their buying journey.
+You are an expert B2B marketing strategist evaluating content designed to influence a {persona} in the {stage} stage of the buying journey.
 
-Format your response EXACTLY like this for each criterion:
+Analyze the content across the following 8 categories:
+	1.	Clarity & Structure
+	2.	Audience Relevance
+	3.	Value & Insight
+	4.	Call to Action
+	5.	Brand Voice & Tone
+	6.	SEO & Discoverability
+	7.	Visual/Design Integration
+	8.	Performance Readiness
 
-1. Clarity & Structure - Score: 4
-Reason: The content is well-organized with clear headings
-Recommendation: Add more subheadings to improve scanability
+For each category, return:
+	•	A score (1–5)
+	•	A short explanation of the rationale (why it earned that score)
+	•	A specific recommendation to improve performance in that area
 
-2. Audience Relevance - Score: 3
-Reason: Content addresses some audience needs but could be more specific
-Recommendation: Include more persona-specific examples
+Important: Be concise but insightful. Avoid generic feedback. Tailor each suggestion to the content and persona. Use a structured JSON format as shown:
 
-[Continue for all 8 criteria...]
+[
+  {
+    "label": "Clarity & Structure",
+    "score": 4,
+    "reason": "The content is logically organized but has a few repetitive elements.",
+    "recommendation": "Remove duplicate headings and improve transitions between sections."
+  },
+  ...
+]
 
-Total Score: 28
+Now evaluate this content:
 
-Criteria:
-1. Clarity & Structure
-2. Audience Relevance
-3. Value & Insight
-4. Call to Action
-5. Brand Voice & Tone
-6. SEO & Discoverability
-7. Visual/Design Integration
-8. Performance Readiness
+“””{content}”””
 
 Content:
 {text[:5000]}
 """
 
     try:
-        response = client.chat.completions.create(
+        # Use legacy OpenAI API style
+        response = openai.ChatCompletion.create(
             model="gpt-4",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.4,
@@ -152,11 +145,15 @@ def analyze():
         persona = request.form.get('persona', 'General')
         stage = request.form.get('stage', 'Unaware')
 
+        print(f"Received analysis request for {persona} in {stage} stage")
+
         if not file:
             return jsonify({'error': 'No file uploaded'}), 400
 
         filename = file.filename.lower()
         content = ""
+        
+        print(f"Processing file: {filename}")
         
         if filename.endswith('.pdf'):
             content = extract_text_from_pdf(file)
@@ -171,29 +168,35 @@ def analyze():
             return jsonify({'error': 'Could not extract text from file'}), 400
 
         print(f"Extracted {len(content)} characters from {filename}")
-        print(f"Analyzing for {persona} in {stage} stage")
 
         # Get AI feedback
+        print("Calling OpenAI API...")
         feedback = summarize_insights(content, persona, stage)
         
         if feedback.startswith("Error:"):
+            print(f"OpenAI Error: {feedback}")
             return jsonify({'error': feedback}), 500
         
-        print("Raw AI Response:")
-        print(feedback[:500] + "..." if len(feedback) > 500 else feedback)
+        print("Received AI response, parsing...")
+        print("Raw AI Response (first 300 chars):")
+        print(feedback[:300] + "..." if len(feedback) > 300 else feedback)
         
         # Parse the response
         scores, total_score = parse_response(feedback)
         
+        print(f"Parsed response: {len(scores)} scores, total: {total_score}")
+        
         if not scores:
-            # Fallback response for debugging
+            # Return raw response for debugging
+            print("No scores parsed, returning raw response")
             return jsonify({
                 'error': 'Could not parse AI response',
                 'raw_response': feedback,
                 'scores': [],
                 'overall_score': 0
-            }), 500
+            })
 
+        print("Returning successful response")
         return jsonify({
             "scores": scores,
             "overall_score": total_score
@@ -201,6 +204,8 @@ def analyze():
 
     except Exception as e:
         print(f"Analysis error: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({
             'error': 'Internal server error', 
             'details': str(e)
@@ -210,6 +215,17 @@ def analyze():
 def home():
     return jsonify({'message': 'Content Assessment API is running', 'status': 'healthy'})
 
+@app.route('/test', methods=['GET', 'POST'])
+def test():
+    """Test endpoint for debugging"""
+    return jsonify({
+        'message': 'Test endpoint working',
+        'openai_key_set': bool(openai.api_key),
+        'environment': os.environ.get('ENVIRONMENT', 'unknown')
+    })
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
+    print(f"Starting server on port {port}")
+    print(f"OpenAI API key set: {bool(openai.api_key)}")
     app.run(host='0.0.0.0', port=port, debug=True)
