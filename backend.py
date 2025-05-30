@@ -31,31 +31,36 @@ def extract_text_from_docx(file_stream):
 
 def summarize_insights(text, persona, stage):
     prompt = f"""
-You are an expert B2B marketing strategist evaluating content designed to influence a {persona} in the {stage} stage of the buying journey.
+You are an expert B2B marketing strategist and content evaluator.
 
-Analyze the content across the following 8 categories:
-	1.	Clarity & Structure
-	2.	Audience Relevance
-	3.	Value & Insight
-	4.	Call to Action
-	5.	Brand Voice & Tone
-	6.	SEO & Discoverability
-	7.	Visual/Design Integration
-	8.	Performance Readiness
+Your task is to assess how effectively the following content influences a {persona} in the {stage} stage of their buying journey. The evaluation should reflect not only general quality but also how well the content meets the *specific informational, emotional, and strategic needs* of this persona at this stage.
+
+Consider:
+- What this persona *cares about* (e.g., ROI, technical fit, risk mitigation, scalability, etc.)
+- What this stage of the buying journey *requires* (e.g., education, differentiation, trust-building, justification)
+
+Evaluate the content across these 8 categories:
+1. Clarity & Structure  
+2. Audience Relevance  
+3. Value & Insight  
+4. Call to Action  
+5. Brand Voice & Tone  
+6. SEO & Discoverability  
+7. Visual/Design Integration  
+8. Performance Readiness  
 
 For each category, return:
-	•	A score (1–5)
-	•	A short explanation of the rationale (why it earned that score)
-	•	A specific recommendation to improve performance in that area
+- A score from 1 to 5 (where 5 = excellent alignment with persona and stage needs)  
+- A concise rationale (not generic)  
+- One clear, actionable recommendation tailored to improve the score for this specific persona and stage  
 
-Important: Be concise but insightful. Avoid generic feedback. Tailor each suggestion to the content and persona. Use a structured JSON format as shown:
-
+Use the following structured JSON output format:
 [
   {{
     "label": "Clarity & Structure",
     "score": 4,
-    "reason": "The content is logically organized but has a few repetitive elements.",
-    "recommendation": "Remove duplicate headings and improve transitions between sections."
+    "reason": "The content is logically organized but lacks clarity in key sections relevant to a CMO evaluating strategic platforms.",
+    "recommendation": "Add summary callouts for each section to help time-pressed CMOs quickly grasp benefits and next steps."
   }},
   ...
 ]
