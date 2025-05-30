@@ -50,20 +50,17 @@ For each category, return:
 Important: Be concise but insightful. Avoid generic feedback. Tailor each suggestion to the content and persona. Use a structured JSON format as shown:
 
 [
-  {
+  {{
     "label": "Clarity & Structure",
     "score": 4,
     "reason": "The content is logically organized but has a few repetitive elements.",
     "recommendation": "Remove duplicate headings and improve transitions between sections."
-  },
+  }},
   ...
 ]
 
 Now evaluate this content:
 
-“””{content}”””
-
-Content:
 {text[:5000]}
 """
 
