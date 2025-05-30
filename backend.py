@@ -82,6 +82,20 @@ Now evaluate this content:
 def parse_response(feedback):
     """Parse the OpenAI response into structured data"""
     try:
+        import json
+        
+        # First, try to parse as JSON directly
+        try:
+            scores = json.loads(feedback)
+            if isinstance(scores, list) and all('label' in item and 'score' in item for item in scores):
+                # Calculate total score
+                total_score = sum(item.get('score', 0) for item in scores)
+                print(f"Parsed {len(scores)} criteria with total score: {total_score}")
+                return scores, total_score
+        except json.JSONDecodeError:
+            print("Response is not valid JSON, trying text parsing...")
+        
+        # Fallback to original text parsing method
         scores = []
         lines = feedback.split('\n')
         
