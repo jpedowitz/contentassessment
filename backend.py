@@ -1,5 +1,6 @@
 import os
 import io
+import sys
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from PyPDF2 import PdfReader
@@ -17,7 +18,7 @@ def extract_text_from_pdf(file_stream):
         reader = PdfReader(file_stream)
         return "\n".join([page.extract_text() or '' for page in reader.pages])
     except Exception as e:
-        print(f"PDF extraction error: {e}")
+        print(f"PDF extraction error: {e}", flush=True)
         return ""
 
 def extract_text_from_docx(file_stream):
@@ -25,7 +26,7 @@ def extract_text_from_docx(file_stream):
         doc = docx.Document(file_stream)
         return "\n".join([para.text for para in doc.paragraphs])
     except Exception as e:
-        print(f"DOCX extraction error: {e}")
+        print(f"DOCX extraction error: {e}", flush=True)
         return ""
 
 def summarize_insights(text, persona, stage):
@@ -76,7 +77,7 @@ Now evaluate this content:
         return response.choices[0].message.content.strip()
     
     except Exception as e:
-        print(f"OpenAI API error: {e}")
+        print(f"OpenAI API error: {e}", flush=True)
         return f"Error: {str(e)}"
 
 def parse_response(feedback):
@@ -90,10 +91,10 @@ def parse_response(feedback):
             if isinstance(scores, list) and all('label' in item and 'score' in item for item in scores):
                 # Calculate total score
                 total_score = sum(item.get('score', 0) for item in scores)
-                print(f"Parsed {len(scores)} criteria with total score: {total_score}")
+                print(f"Parsed {len(scores)} criteria with total score: {total_score}", flush=True)
                 return scores, total_score
         except json.JSONDecodeError:
-            print("Response is not valid JSON, trying text parsing...")
+            print("Response is not valid JSON, trying text parsing...", flush=True)
         
         # Fallback to original text parsing method
         scores = []
@@ -141,12 +142,12 @@ def parse_response(feedback):
         # Calculate total score
         total_score = sum(item.get('score', 0) for item in scores)
         
-        print(f"Parsed {len(scores)} criteria with total score: {total_score}")
+        print(f"Parsed {len(scores)} criteria with total score: {total_score}", flush=True)
         
         return scores, total_score
     
     except Exception as e:
-        print(f"Parsing error: {e}")
+        print(f"Parsing error: {e}", flush=True)
         return [], 0
 
 @app.route('/analyze', methods=['POST'])
@@ -156,7 +157,7 @@ def analyze():
         persona = request.form.get('persona', 'General')
         stage = request.form.get('stage', 'Unaware')
 
-        print(f"Received analysis request for {persona} in {stage} stage")
+        print(f"=== ANALYSIS START: {persona} in {stage} stage ===", flush=True)
 
         if not file:
             return jsonify({'error': 'No file uploaded'}), 400
@@ -164,7 +165,7 @@ def analyze():
         filename = file.filename.lower()
         content = ""
         
-        print(f"Processing file: {filename}")
+        print(f"Processing file: {filename}", flush=True)
         
         if filename.endswith('.pdf'):
             content = extract_text_from_pdf(file)
@@ -178,28 +179,29 @@ def analyze():
         if not content.strip():
             return jsonify({'error': 'Could not extract text from file'}), 400
 
-        print(f"Extracted {len(content)} characters from {filename}")
+        print(f"Extracted {len(content)} characters from {filename}", flush=True)
+        print(f"First 200 chars: {content[:200]}...", flush=True)
 
         # Get AI feedback
-        print("Calling OpenAI API...")
+        print("=== CALLING OPENAI API ===", flush=True)
         feedback = summarize_insights(content, persona, stage)
         
         if feedback.startswith("Error:"):
-            print(f"OpenAI Error: {feedback}")
+            print(f"OpenAI Error: {feedback}", flush=True)
             return jsonify({'error': feedback}), 500
         
-        print("Received AI response, parsing...")
-        print("Raw AI Response (first 300 chars):")
-        print(feedback[:300] + "..." if len(feedback) > 300 else feedback)
+        print("=== RECEIVED AI RESPONSE ===", flush=True)
+        print("Raw AI Response (first 500 chars):", flush=True)
+        print(feedback[:500] + "..." if len(feedback) > 500 else feedback, flush=True)
         
         # Parse the response
         scores, total_score = parse_response(feedback)
         
-        print(f"Parsed response: {len(scores)} scores, total: {total_score}")
+        print(f"=== PARSED RESPONSE: {len(scores)} scores, total: {total_score} ===", flush=True)
         
         if not scores:
             # Return raw response for debugging
-            print("No scores parsed, returning raw response")
+            print("No scores parsed, returning raw response", flush=True)
             return jsonify({
                 'error': 'Could not parse AI response',
                 'raw_response': feedback,
@@ -207,14 +209,14 @@ def analyze():
                 'overall_score': 0
             })
 
-        print("Returning successful response")
+        print("=== RETURNING SUCCESS ===", flush=True)
         return jsonify({
             "scores": scores,
             "overall_score": total_score
         })
 
     except Exception as e:
-        print(f"Analysis error: {e}")
+        print(f"=== ANALYSIS ERROR: {e} ===", flush=True)
         import traceback
         traceback.print_exc()
         return jsonify({
@@ -237,6 +239,6 @@ def test():
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
-    print(f"Starting server on port {port}")
-    print(f"OpenAI API key set: {bool(openai.api_key)}")
+    print(f"Starting server on port {port}", flush=True)
+    print(f"OpenAI API key set: {bool(openai.api_key)}", flush=True)
     app.run(host='0.0.0.0', port=port, debug=True)
