@@ -1,6 +1,8 @@
 import os
 import io
 import sys
+import time
+from functools import wraps
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from PyPDF2 import PdfReader
@@ -12,6 +14,22 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 
 app = Flask(__name__)
 CORS(app)
+
+def retry_on_timeout(max_retries=2):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            for attempt in range(max_retries + 1):
+                try:
+                    return func(*args, **kwargs)
+                except openai.error.Timeout:
+                    if attempt == max_retries:
+                        raise
+                    print(f"Timeout on attempt {attempt + 1}, retrying...", flush=True)
+                    time.sleep(2 ** attempt)  # Exponential backoff
+            return None
+        return wrapper
+    return decorator
 
 def extract_text_from_pdf(file_stream):
     try:
@@ -29,6 +47,7 @@ def extract_text_from_docx(file_stream):
         print(f"DOCX extraction error: {e}", flush=True)
         return ""
 
+@retry_on_timeout(max_retries=2)
 def summarize_insights(text, persona, stage):
     prompt = f"""
 You are an expert B2B marketing strategist and content evaluator.
@@ -67,20 +86,24 @@ Use the following structured JSON output format:
 
 Now evaluate this content:
 
-{text[:5000]}
+{text[:3000]}
 """
 
     try:
-        # Use legacy OpenAI API style
+        # Use legacy OpenAI API style with timeout
         response = openai.ChatCompletion.create(
             model="gpt-4",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.4,
-            max_tokens=2000
+            max_tokens=1500,
+            request_timeout=60  # 60 second timeout for OpenAI
         )
         
         return response.choices[0].message.content.strip()
     
+    except openai.error.Timeout as e:
+        print(f"OpenAI timeout error: {e}", flush=True)
+        return "Error: Request timed out. Please try again with shorter content."
     except Exception as e:
         print(f"OpenAI API error: {e}", flush=True)
         return f"Error: {str(e)}"
